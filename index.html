@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Office Booking Calendar</title>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <style>
+        /* CSS styles are unchanged */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f0f2f5; color: #333; margin: 0; }
+        .calendar-container { width: 95%; max-width: 900px; background: #ffffff; border-radius: 10px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); overflow: hidden; display: flex; flex-direction: column; }
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 30px; background-color: #007bff; color: white; }
+        .calendar-header h2 { margin: 0; font-size: 1.5rem; }
+        .nav-btn { background: none; border: 1px solid white; color: white; font-size: 1.5rem; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; transition: background-color 0.3s; }
+        .nav-btn:hover { background-color: rgba(255, 255, 255, 0.2); }
+        .days-of-week { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; padding: 10px 0; background-color: #f8f9fa; font-weight: bold; color: #6c757d; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background-color: #e9ecef; padding: 1px; }
+        .calendar-day { position: relative; background-color: white; min-height: 120px; padding: 8px; font-size: 0.9rem; color: #495057; transition: background-color 0.3s; }
+        .calendar-day .day-number { font-weight: bold; }
+        .calendar-day.other-month { background-color: #f8f9fa; color: #ced4da; }
+        .calendar-day.available:not(.past-day):hover { background-color: #e2e6ea; cursor: pointer; }
+        .calendar-day.today .day-number { background-color: #007bff; color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; justify-content: center; align-items: center; }
+        .calendar-day.past-day { background-color: #f8f9fa; color: #adb5bd; cursor: not-allowed; }
+        .calendar-day.fully-booked::after, .calendar-day.loading::after { content: attr(data-status); position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: bold; color: #6c757d; }
+        .calendar-day.fully-booked::after { color: #dc3545; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; }
+        .modal-content { background-color: #fff; margin: auto; padding: 30px; border-radius: 8px; width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover, .close-btn:focus { color: #000; }
+        .modal-header h3 { margin-top: 0; color: #007bff; }
+        .time-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin: 20px 0; }
+        .time-slot { padding: 10px; border: 1px solid #ddd; border-radius: 5px; text-align: center; cursor: pointer; transition: background-color 0.3s, color 0.3s; }
+        .time-slot:hover { background-color: #f0f0f0; }
+        .time-slot.selected { background-color: #007bff; color: white; border-color: #007bff; }
+        .time-slot.booked { background-color: #f8f9fa; color: #adb5bd; cursor: not-allowed; text-decoration: line-through; }
+        #booking-form input, #booking-form textarea { padding: 12px; border: 1px solid #ccc; border-radius: 5px; font-family: inherit; font-size: 1rem; }
+        #booking-form { display: flex; flex-direction: column; gap: 15px; }
+        #booking-form button { padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; transition: background-color 0.3s; }
+        #booking-form button:hover { background-color: #218838; }
+    </style>
+</head>
+<body>
+
+    <div class="calendar-container">
+        <div class="calendar-header">
+            <button class="nav-btn" id="prev-month"><</button>
+            <h2 id="month-year"></h2>
+            <button class="nav-btn" id="next-month">></button>
+        </div>
+        <div class="days-of-week">
+            <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div>
+        </div>
+        <div class="calendar-grid" id="calendar-grid"></div>
+    </div>
+
+    <div id="booking-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="close-modal">×</span>
+            <div class="modal-header">
+                <h3>Request a Booking</h3>
+                <p>Selected Date: <span id="selected-date-display"></span></p>
+            </div>
+            
+            <h4>Available Times:</h4>
+            <div class="time-slots" id="time-slots-container"></div>
+            
+            <form id="booking-form" action="https://formspree.io/f/xkgbodge" method="POST">
+                <input type="hidden" id="form-date" name="date">
+                <input type="hidden" id="form-time" name="time">
+                <input type="text" name="name" placeholder="Your Name" required>
+                <input type="email" name="email" placeholder="Your Email (for confirmation)" required>
+                <input type="tel" name="phone" placeholder="Phone Number" required>
+                <textarea name="purpose" rows="4" placeholder="Purpose of Booking (e.g., Photoshoot, Client Meeting)" required></textarea>
+                <button type="submit">Send Booking Request</button>
+            </form>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // =============================================
+    // --- PASTE YOUR NEW CREDENTIALS HERE ---
+    // =============================================
+    const API_KEY = 'PASTE_YOUR_NEW_API_KEY_HERE'; 
+    const CALENDAR_ID = 'c_fd86f46aa84b02dcd1f35e89ea0243700785a22dd10f7ccde6880e13d788e846@group.calendar.google.com';
+
+    // --- DOM Elements ---
+    const calendarGrid = document.getElementById('calendar-grid');
+    const monthYearDisplay = document.getElementById('month-year');
+    const prevMonthBtn = document.getElementById('prev-month');
+    const nextMonthBtn = document.getElementById('next-month');
+    const bookingModal = document.getElementById('booking-modal');
+    const closeModalBtn = document.getElementById('close-modal');
+    const selectedDateDisplay = document.getElementById('selected-date-display');
+    const timeSlotsContainer = document.getElementById('time-slots-container');
+    const bookingForm = document.getElementById('booking-form');
+    const formDateInput = document.getElementById('form-date');
+    const formTimeInput = document.getElementById('form-time');
+
+    let currentDate = new Date();
+    let googleCalendarEvents = [];
+
+    const availableTimeSlots = [
+        "09:00 - 10:00", "10:00 - 11:00", "11:00 - 12:00", "12:00 - 13:00",
+        "14:00 - 15:00", "15:00 - 16:00", "16:00 - 17:00", "17:00 - 18:00"
+    ];
+
+    function initializeGapi() {
+        gapi.load('client', function() {
+            gapi.client.init({
+                'apiKey': API_KEY,
+                'discoveryDocs': ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
+            }).then(function() {
+                renderCalendar(); 
+            }, function(error) {
+                console.error("Error initializing Google API client:", error);
+                alert("Could not connect to Google Calendar. Please check your API Key and Calendar ID.");
+            });
+        });
+    }
+
+    function fetchEventsForMonth(date) {
+        const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+        const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+        return gapi.client.calendar.events.list({
+            'calendarId': CALENDAR_ID,
+            'timeMin': firstDay.toISOString(),
+            'timeMax': lastDay.toISOString(),
+            'showDeleted': false,
+            'singleEvents': true,
+            'orderBy': 'startTime'
+        });
+    }
+    
+    async function renderCalendar() {
+        calendarGrid.innerHTML = '<div class="calendar-day loading" style="grid-column: span 7; text-align: center; align-items: center; justify-content: center; display: flex;" data-status="Loading events..."></div>';
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        monthYearDisplay.textContent = `${currentDate.toLocaleString('default', { month: 'long' })} ${year}`;
+        try {
+            const response = await fetchEventsForMonth(currentDate);
+            googleCalendarEvents = response.result.items;
+            drawCalendarGrid(year, month);
+        } catch (error) {
+            console.error("Error fetching Google Calendar events:", error);
+            calendarGrid.innerHTML = '<div class="calendar-day" style="grid-column: span 7; color: red; text-align:center;">Failed to load calendar events. Check console for details.</div>';
+        }
+    }
+    
+    function drawCalendarGrid(year, month) {
+        calendarGrid.innerHTML = '';
+        const firstDayOfMonth = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const today = new Date();
+        for (let i = 0; i < firstDayOfMonth; i++) {
+            const emptyCell = document.createElement('div');
+            emptyCell.classList.add('calendar-day', 'other-month');
+            calendarGrid.appendChild(emptyCell);
+        }
+        for (let day = 1; day <= daysInMonth; day++) {
+            const dayCell = document.createElement('div');
+            const dayDate = new Date(year, month, day);
+            const dateString = dayDate.toISOString().split('T')[0];
+            dayCell.classList.add('calendar-day');
+            dayCell.dataset.date = dateString;
+            const dayNumber = document.createElement('div');
+            dayNumber.classList.add('day-number');
+            dayNumber.textContent = day;
+            dayCell.appendChild(dayNumber);
+            if (dayDate < today.setHours(0, 0, 0, 0)) {
+                dayCell.classList.add('past-day');
+            } else {
+                const bookedSlots = getBookedSlotsForDate(dateString);
+                if (bookedSlots.length >= availableTimeSlots.length) {
+                    dayCell.classList.add('fully-booked');
+                    dayCell.dataset.status = "Fully Booked";
+                } else {
+                    dayCell.classList.add('available');
+                }
+            }
+            if (year === today.getFullYear() && month === today.getMonth() && day === today.getDate()) {
+                dayCell.classList.add('today');
+            }
+            calendarGrid.appendChild(dayCell);
+        }
+    }
+
+    function getBookedSlotsForDate(dateString) {
+        const bookedSlots = [];
+        if (!googleCalendarEvents) return bookedSlots;
+        googleCalendarEvents.forEach(event => {
+            if (event.start.date === dateString || (event.start.dateTime && event.start.dateTime.startsWith(dateString))) {
+                if (availableTimeSlots.includes(event.summary)) {
+                    bookedSlots.push(event.summary);
+                }
+            }
+        });
+        return bookedSlots;
+    }
+    
+    function openBookingModal(date) {
+        bookingModal.style.display = 'flex';
+        const formattedDate = new Date(date + 'T00:00:00').toLocaleDateString('default', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        selectedDateDisplay.textContent = formattedDate;
+        formDateInput.value = formattedDate;
+        bookingForm.reset();
+        formDateInput.value = formattedDate; 
+        const bookedSlotsForDate = getBookedSlotsForDate(date);
+        renderTimeSlots(bookedSlotsForDate);
+    }
+
+    function renderTimeSlots(bookedSlotsForDate) {
+        timeSlotsContainer.innerHTML = '';
+        formTimeInput.value = '';
+        availableTimeSlots.forEach(slot => {
+            const slotElement = document.createElement('div');
+            slotElement.classList.add('time-slot');
+            slotElement.textContent = slot;
+            slotElement.dataset.time = slot;
+            if (bookedSlotsForDate.includes(slot)) {
+                slotElement.classList.add('booked');
+            }
+            timeSlotsContainer.appendChild(slotElement);
+        });
+    }
+
+    function closeBookingModal() {
+        bookingModal.style.display = 'none';
+    }
+
+    prevMonthBtn.addEventListener('click', () => {
+        currentDate.setMonth(currentDate.getMonth() - 1);
+        renderCalendar();
+    });
+    nextMonthBtn.addEventListener('click', () => {
+        currentDate.setMonth(currentDate.getMonth() + 1);
+        renderCalendar();
+    });
+    closeModalBtn.addEventListener('click', closeBookingModal);
+    window.addEventListener('click', (e) => {
+        if (e.target === bookingModal) closeBookingModal();
+    });
+    calendarGrid.addEventListener('click', (e) => {
+        const dayCell = e.target.closest('.calendar-day.available');
+        if (dayCell) openBookingModal(dayCell.dataset.date);
+    });
+    timeSlotsContainer.addEventListener('click', (e) => {
+        const targetSlot = e.target;
+        if (targetSlot.classList.contains('time-slot') && !targetSlot.classList.contains('booked')) {
+            const previouslySelected = timeSlotsContainer.querySelector('.selected');
+            if (previouslySelected) previouslySelected.classList.remove('selected');
+            targetSlot.classList.add('selected');
+            formTimeInput.value = targetSlot.dataset.time;
+        }
+    });
+    
+    initializeGapi(); 
+});
+</script>
+</body>
+</html>
